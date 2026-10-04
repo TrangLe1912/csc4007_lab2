@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 import regex as regex_u
 
@@ -12,6 +13,28 @@ DIGIT_RE = re.compile(r"\b\d+(?:[.,/]\d+)?\b")
 PUNCT_RE = re.compile(r"([!?.,;:()\[\]{}\"'\-_/])")
 
 
+def segment_vietnamese(text: str, method: str = "none") -> str:
+    """Optional Vietnamese word segmentation.
+
+    'none' keeps the cleaned text unchanged.
+    'underthesea' joins multi-syllable words with underscores.
+    """
+    if method == "none":
+        return text
+    if method != "underthesea":
+        raise ValueError(f"Unsupported Vietnamese segmenter: {method}")
+
+    try:
+        from underthesea import word_tokenize
+    except ImportError as exc:
+        raise ImportError(
+            "Vietnamese segmentation requires underthesea. "
+            "Install dependencies with: pip install -r requirements.txt"
+        ) from exc
+
+    return word_tokenize(text, format="text")
+
+
 def basic_clean_text(
     text: str,
     lowercase: bool = True,
@@ -19,16 +42,22 @@ def basic_clean_text(
     replace_email: bool = True,
     replace_number: bool = False,
     keep_punct: bool = True,
+    normalize_unicode: bool = True,
+    vi_segment: str = "none",
 ) -> str:
-    """Tiền xử lý mức vừa phải cho IMDB.
+    """Moderate text cleaning for the Lab 2 comparison experiments.
 
-    Chủ đích của Lab 2 là để sinh viên so sánh pipeline,
-    nên hàm này chỉ làm sạch vừa phải thay vì “dọn quá tay”.
+    The function deliberately avoids aggressive cleaning. For Vietnamese text,
+    Unicode NFC normalization is safe by default and word segmentation is an
+    explicit experimental choice rather than a mandatory rule.
     """
     if text is None:
         return ""
 
     t = str(text).strip()
+    if normalize_unicode:
+        t = unicodedata.normalize("NFC", t)
+
     t = t.replace("\u00a0", " ")
     t = HTML_TAG_RE.sub(" ", t)
     t = regex_u.sub(r"\p{C}+", " ", t)
@@ -48,4 +77,9 @@ def basic_clean_text(
         t = PUNCT_RE.sub(" ", t)
 
     t = MULTI_SPACE_RE.sub(" ", t).strip()
+
+    if vi_segment != "none":
+        t = segment_vietnamese(t, method=vi_segment)
+        t = MULTI_SPACE_RE.sub(" ", t).strip()
+
     return t
