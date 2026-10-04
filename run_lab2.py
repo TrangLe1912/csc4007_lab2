@@ -28,20 +28,38 @@ def main() -> None:
     ap.add_argument("--data_path", default=None)
     ap.add_argument("--text_col", default="text")
     ap.add_argument("--label_col", default="label")
+    ap.add_argument("--language", default="en", choices=["en", "vi"])
+    ap.add_argument("--vi_segment", default="none", choices=["none", "underthesea"])
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max_rows", type=int, default=None)
     ap.add_argument("--vectorizer", default="tfidf", choices=["bow", "tfidf"])
     ap.add_argument("--model", default="logreg", choices=["logreg", "linearsvm"])
+    ap.add_argument("--analyzer", default="word", choices=["word", "char", "char_wb"])
     ap.add_argument("--max_features", type=int, default=20000)
+    ap.add_argument("--ngram_min", type=int, default=1)
     ap.add_argument("--ngram_max", type=int, default=2)
     ap.add_argument("--replace_number", action="store_true")
     ap.add_argument("--drop_punct", action="store_true")
+    ap.add_argument("--output_dir", default="outputs")
     args = ap.parse_args()
+
+    if args.vi_segment != "none" and args.language != "vi":
+        raise ValueError("--vi_segment is only intended for --language vi")
+    if args.ngram_min < 1 or args.ngram_max < args.ngram_min:
+        raise ValueError("Require 1 <= --ngram_min <= --ngram_max")
 
     set_seed(args.seed)
 
-    out_dir = Path("outputs")
-    for sub in ["logs", "splits", "metrics", "figures", "error_analysis", "pipeline", "predictions"]:
+    out_dir = Path(args.output_dir)
+    for sub in [
+        "logs",
+        "splits",
+        "metrics",
+        "figures",
+        "error_analysis",
+        "pipeline",
+        "predictions",
+    ]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
     df = load_dataset_any(
@@ -59,7 +77,11 @@ def main() -> None:
         ("Distribution / Length", audit_distribution_length(df)),
         ("Duplicates", audit_duplicates(df)),
     ]
-    render_audit_md(out_dir / "logs" / "audit_before.md", "Audit BEFORE preprocessing", sec_before)
+    render_audit_md(
+        out_dir / "logs" / "audit_before.md",
+        "Audit BEFORE preprocessing",
+        sec_before,
+    )
 
     df_clean = df.copy()
     df_clean["text"] = df_clean["text"].map(
@@ -70,6 +92,8 @@ def main() -> None:
             replace_email=True,
             replace_number=args.replace_number,
             keep_punct=not args.drop_punct,
+            normalize_unicode=True,
+            vi_segment=args.vi_segment,
         )
     )
 
@@ -78,8 +102,16 @@ def main() -> None:
         ("Distribution / Length", audit_distribution_length(df_clean)),
         ("Duplicates", audit_duplicates(df_clean)),
     ]
-    render_audit_md(out_dir / "logs" / "audit_after.md", "Audit AFTER preprocessing", sec_after)
-    render_audit_md(out_dir / "logs" / "data_audit.md", "Audit Summary", sec_before + sec_after)
+    render_audit_md(
+        out_dir / "logs" / "audit_after.md",
+        "Audit AFTER preprocessing",
+        sec_after,
+    )
+    render_audit_md(
+        out_dir / "logs" / "data_audit.md",
+        "Audit Summary",
+        sec_before + sec_after,
+    )
 
     splits = make_splits(df_clean, seed=args.seed)
     for name, d in splits.items():
@@ -93,7 +125,9 @@ def main() -> None:
         vectorizer_name=args.vectorizer,
         model_name=args.model,
         max_features=args.max_features,
+        ngram_min=args.ngram_min,
         ngram_max=args.ngram_max,
+        analyzer=args.analyzer,
         seed=args.seed,
     )
     pipe.fit(train_df["text"], train_df["label"])
@@ -109,10 +143,14 @@ def main() -> None:
     metrics = {
         "dataset": args.dataset,
         "dataset_path": args.data_path if args.dataset == "local_csv" else None,
+        "language": args.language,
+        "vi_segment": args.vi_segment,
         "seed": args.seed,
         "vectorizer": args.vectorizer,
+        "analyzer": args.analyzer,
         "model": args.model,
         "max_features": args.max_features,
+        "ngram_min": args.ngram_min,
         "ngram_max": args.ngram_max,
         "replace_number": args.replace_number,
         "drop_punct": args.drop_punct,
@@ -120,26 +158,45 @@ def main() -> None:
         "val": compute_metrics(val_df["label"], y_pred_val),
         "test": compute_metrics(test_df["label"], y_pred_test),
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "notes": "Split trước, fit vectorizer trên train, evaluate trên val/test để tránh leakage.",
+        "notes": (
+            "Split trước, fit vectorizer trên train, evaluate trên val/test để tránh leakage. "
+            "Vietnamese word segmentation is an experimental choice, not a mandatory rule."
+        ),
     }
     save_metrics(metrics, out_dir / "metrics")
-    save_confusion_matrix(test_df["label"], y_pred_test, out_dir / "figures" / "confusion_matrix.png")
+    cm_name = "IMDB" if args.dataset == "imdb" else "Local CSV / VietNewsSense"
+    save_confusion_matrix(
+        test_df["label"],
+        y_pred_test,
+        out_dir / "figures" / "confusion_matrix.png",
+        title=f"Confusion Matrix ({cm_name})",
+    )
 
     pred_df = test_df.copy()
     pred_df["pred_label"] = y_pred_test
     pred_df.to_csv(out_dir / "predictions" / "test_predictions.csv", index=False)
 
     errors = build_error_analysis(test_df, y_pred_test, y_proba=y_proba_test)
-    save_error_analysis(errors, out_dir / "error_analysis", min_expected=10)
+    min_expected = 5 if args.language == "vi" else 10
+    save_error_analysis(
+        errors,
+        out_dir / "error_analysis",
+        min_expected=min_expected,
+        language=args.language,
+    )
 
     joblib.dump(pipe, out_dir / "pipeline" / "model_pipeline.joblib")
 
     summary = {
         "dataset": args.dataset,
+        "language": args.language,
+        "vi_segment": args.vi_segment,
         "seed": args.seed,
         "vectorizer": args.vectorizer,
+        "analyzer": args.analyzer,
         "model": args.model,
         "max_features": args.max_features,
+        "ngram_min": args.ngram_min,
         "ngram_max": args.ngram_max,
         "replace_number": args.replace_number,
         "drop_punct": args.drop_punct,
@@ -151,7 +208,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print("DONE.")
+    print(f"DONE. Outputs: {out_dir}")
 
 
 if __name__ == "__main__":

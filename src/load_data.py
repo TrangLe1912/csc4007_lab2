@@ -11,7 +11,7 @@ LABEL_MAP_IMDB = {0: "negative", 1: "positive"}
 
 
 def load_imdb(max_rows: int | None = None, seed: int = 42) -> pd.DataFrame:
-    ds = load_dataset("imdb")
+    ds = load_dataset("stanfordnlp/imdb")
     df_train = pd.DataFrame(ds["train"])
     df_test = pd.DataFrame(ds["test"])
     df_train["split_orig"] = "hf_train"
@@ -36,6 +36,7 @@ def load_local_csv(
     text_col: str = "text",
     label_col: str = "label",
 ) -> pd.DataFrame:
+    """Load a local CSV while preserving useful metadata columns."""
     data_path = Path(data_path)
     if not data_path.exists():
         raise FileNotFoundError(f"Cannot find data file: {data_path}")
@@ -47,14 +48,19 @@ def load_local_csv(
         raise ValueError(f"Missing label column: {label_col}. Available: {list(df.columns)}")
 
     out = df.copy()
+
+    if text_col != "text" and "text" in out.columns:
+        raise ValueError("CSV already contains a text column; choose an unambiguous --text_col.")
+    if label_col != "label" and "label" in out.columns:
+        raise ValueError("CSV already contains a label column; choose an unambiguous --label_col.")
+
+    out = out.rename(columns={text_col: "text", label_col: "label"})
     if "id" not in out.columns:
         out.insert(0, "id", range(len(out)))
 
-    out = out.rename(columns={text_col: "text", label_col: "label"})
-    keep_cols = ["id", "text", "label"]
-    if "split_orig" in out.columns:
-        keep_cols.append("split_orig")
-    return out[keep_cols].copy()
+    core = ["id", "text", "label"]
+    metadata = [c for c in out.columns if c not in core]
+    return out[core + metadata].copy()
 
 
 def load_dataset_any(

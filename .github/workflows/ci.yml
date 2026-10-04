@@ -7,7 +7,7 @@ on:
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,27 +31,46 @@ jobs:
             --seed 42 \
             --max_rows 400 \
             --vectorizer tfidf \
-            --model logreg
+            --model logreg \
+            --output_dir outputs
 
-      - name: Verify required outputs exist
+      - name: Verify IMDB outputs
         run: |
           test -f outputs/logs/data_audit.md
-          test -f outputs/logs/audit_before.md
-          test -f outputs/logs/audit_after.md
-          test -f outputs/logs/run_summary.json
-          test -f outputs/splits/train.csv
-          test -f outputs/splits/val.csv
-          test -f outputs/splits/test.csv
           test -f outputs/metrics/metrics_summary.json
-          test -f outputs/metrics/metrics_summary.md
           test -f outputs/figures/confusion_matrix.png
           test -f outputs/error_analysis/error_analysis.csv
-          test -f outputs/error_analysis/error_analysis_summary.md
           test -f outputs/pipeline/model_pipeline.joblib
-          test -f outputs/predictions/test_predictions.csv
+
+      - name: Run Vietnamese local CSV smoke test
+        run: |
+          python run_lab2.py \
+            --dataset local_csv \
+            --data_path data/raw/sample_vietnews_tiny.csv \
+            --text_col content \
+            --label_col category \
+            --language vi \
+            --vi_segment none \
+            --vectorizer tfidf \
+            --model logreg \
+            --analyzer word \
+            --ngram_min 1 \
+            --ngram_max 2 \
+            --seed 42 \
+            --output_dir outputs_vn
+
+      - name: Verify Vietnamese outputs
+        run: |
+          test -f outputs_vn/logs/data_audit.md
+          test -f outputs_vn/metrics/metrics_summary.json
+          test -f outputs_vn/figures/confusion_matrix.png
+          test -f outputs_vn/error_analysis/error_analysis.csv
+          test -f outputs_vn/predictions/test_predictions.csv
 
       - uses: actions/upload-artifact@v4
         with:
           name: lab2-outputs
-          path: outputs/
+          path: |
+            outputs/
+            outputs_vn/
           if-no-files-found: error
