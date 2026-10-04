@@ -11,7 +11,7 @@ LABEL_MAP_IMDB = {0: "negative", 1: "positive"}
 
 
 def load_imdb(max_rows: int | None = None, seed: int = 42) -> pd.DataFrame:
-    ds = load_dataset("imdb")
+    ds = load_dataset("stanfordnlp/imdb")
     df_train = pd.DataFrame(ds["train"])
     df_test = pd.DataFrame(ds["test"])
     df_train["split_orig"] = "hf_train"
